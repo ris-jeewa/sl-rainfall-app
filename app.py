@@ -29,7 +29,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="🌧️ Sri Lanka Rainfall Predictor",
+    page_title="Sri Lanka Rainfall Predictor",
     page_icon="🌧️",
     layout="wide",
     initial_sidebar_state="expanded"
