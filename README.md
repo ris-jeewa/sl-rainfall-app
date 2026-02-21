@@ -2,6 +2,9 @@
 
 A Streamlit web app that predicts monthly rainfall class (Low / Medium / High) for districts in Sri Lanka using a **Random Forest** classifier trained on historical weather data.
 
+![Sri Lanka Rainfall Predictor](home.png)
+![predicted result](image.png)
+
 ---
 
 ## Features
@@ -57,6 +60,7 @@ SLRainfall Detect/
 ├── app.py                          # Streamlit app & model training
 ├── data/
 │   └── sri-lanka-weather-dataset.csv
+├── home.png                        # App screenshot
 └── README.md
 ```
 
