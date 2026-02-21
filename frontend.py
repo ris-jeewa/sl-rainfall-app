@@ -1,9 +1,3 @@
-"""
-Sri Lanka Rainfall Predictor — Frontend (Streamlit UI)
-======================================================
-All UI, styles, and integration with the model. Run via: streamlit run app.py
-"""
-
 import os
 import warnings
 import shap

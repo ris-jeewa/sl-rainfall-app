@@ -1,10 +1,3 @@
-"""
-Sri Lanka Rainfall Predictor — Model & Data
-============================================
-Pure data loading and model training. No Streamlit dependency.
-Used by frontend.py for integration.
-"""
-
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
@@ -108,3 +101,8 @@ def train_model(path: str):
     acc    = accuracy_score(y_test, y_pred)
 
     return rf, le_district, le_label, features, df, acc, X_test, y_test, y_pred
+
+
+def get_clean_data(df, features):
+    """Return cleaned dataframe with no nulls for SHAP."""
+    return df[features].dropna()
