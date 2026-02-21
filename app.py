@@ -15,10 +15,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay, mean_absolute_error, r2_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 import warnings
 import os
 from datetime import date
@@ -29,7 +29,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Sri Lanka Rainfall Predictor",
+    page_title="🌧️ Sri Lanka Rainfall Predictor",
     page_icon="🌧️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -144,6 +144,7 @@ def load_and_prepare(path):
             temp_max            = ("temperature_2m_max", "mean"),
             temp_min            = ("temperature_2m_min", "mean"),
             monthly_rainfall_mm = ("daily_precip_mm", "sum"),
+            rain_days           = ("precipitation_hours", "sum"),
             wind_speed          = ("wind_speed", "mean"),
             wind_direction      = ("wind_direction", "mean"),
             radiation           = ("radiation", "mean"),
@@ -178,40 +179,28 @@ def train_model(path):
     df["rainfall_class_enc"] = le_label.fit_transform(df["rainfall_class"].astype(str))
 
     features = [
-    "district_enc", "month", "temperature", "temp_max", "temp_min",
-    "wind_speed", "wind_direction",
-    "radiation", "evapotranspiration",
-    "latitude", "longitude", "elevation"
+        "district_enc", "month", "temperature", "temp_max", "temp_min",
+        "wind_speed", "wind_direction",
+        "rain_days", "radiation", "evapotranspiration",
+        "latitude", "longitude", "elevation"
     ]
 
-    df_clean = df[features + ["rainfall_class_enc", "monthly_rainfall_mm"]].dropna()
+    df_clean = df[features + ["rainfall_class_enc"]].dropna()
     X = df_clean[features]
     y = df_clean["rainfall_class_enc"]
-    y_mm = df_clean["monthly_rainfall_mm"]
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    y_train_mm = df_clean.loc[X_train.index, "monthly_rainfall_mm"]
-    y_test_mm  = df_clean.loc[X_test.index, "monthly_rainfall_mm"]
 
     rf = RandomForestClassifier(
         n_estimators=200, max_depth=12,
         min_samples_split=5, random_state=42, class_weight="balanced"
     )
     rf.fit(X_train, y_train)
+
     y_pred = rf.predict(X_test)
     acc    = accuracy_score(y_test, y_pred)
 
-    # Regressor: predict rainfall amount (mm) from same features (no user-provided rainfall)
-    rf_reg = RandomForestRegressor(
-        n_estimators=200, max_depth=12,
-        min_samples_split=5, random_state=42
-    )
-    rf_reg.fit(X_train, y_train_mm)
-    y_pred_mm = rf_reg.predict(X_test)
-    reg_mae = mean_absolute_error(y_test_mm, y_pred_mm)
-    reg_r2  = r2_score(y_test_mm, y_pred_mm)
-
-    return rf, rf_reg, le_district, le_label, features, df, acc, X_test, y_test, y_pred, reg_mae, reg_r2
+    return rf, le_district, le_label, features, df, acc, X_test, y_test, y_pred
 
 
 # ─────────────────────────────────────────────────────────────
@@ -234,7 +223,7 @@ if not os.path.exists(DATA_PATH):
     st.stop()
 
 with st.spinner("Setting up — this takes ~30 sec on first run…"):
-    rf, rf_reg, le_district, le_label, features, df, acc, X_test, y_test, y_pred, reg_mae, reg_r2 = train_model(DATA_PATH)
+    rf, le_district, le_label, features, df, acc, X_test, y_test, y_pred = train_model(DATA_PATH)
 
 districts    = sorted(le_district.classes_.tolist())
 class_names  = le_label.classes_
@@ -247,9 +236,7 @@ with st.sidebar:
     st.markdown("## 📊 Model Info")
     st.metric("Algorithm",      "Random Forest")
     st.metric("Training Rows",  f"{len(df):,}")
-    st.metric("Class Accuracy", f"{acc*100:.2f}%")
-    st.metric("Rainfall MAE (mm)", f"{reg_mae:.1f}")
-    st.metric("Rainfall R²",    f"{reg_r2:.3f}")
+    st.metric("Test Accuracy",  f"{acc*100:.2f}%")
     st.metric("Features Used",  str(len(features)))
     st.markdown("---")
     st.markdown("**Cities covered**")
@@ -306,10 +293,15 @@ with tab1:
             wind_direction = st.slider("Wind Direction (degrees)",  0,   360,  180,  5)
 
         with col4:
-            st.markdown("**🌧️ Other**")
+            st.markdown("**🌧️ Rainfall & Other**")
+            monthly_rainfall_mm = st.slider("Expected Monthly Rainfall (mm)", 0.0, 600.0, 100.0, 5.0)
             rain_days           = st.slider("Rainy Hours (hrs/month)",         0,   300,   60,    5)
             radiation           = st.slider("Solar Radiation (MJ/m²)",         5.0, 30.0,  15.0, 0.5)
             evapotranspiration  = st.slider("Evapotranspiration (mm)",         1.0, 8.0,   3.5,  0.1)
+
+        # Derived humidity
+        p_max    = df["monthly_rainfall_mm"].quantile(0.95)
+        humidity = float(np.clip(55 + 40 * (monthly_rainfall_mm / (p_max + 1e-9)), 40, 100))
 
         submitted = st.form_submit_button("🔮 Predict Rainfall", use_container_width=True, type="primary")
 
@@ -325,29 +317,20 @@ with tab1:
             "temp_min":            temp_min,
             "wind_speed":          wind_speed,
             "wind_direction":      wind_direction,
+            "monthly_rainfall_mm": monthly_rainfall_mm,
             "rain_days":           rain_days,
             "radiation":           radiation,
             "evapotranspiration":  evapotranspiration,
             "latitude":            latitude,
             "longitude":           longitude,
             "elevation":           elevation,
+            "humidity":            humidity,
         }])[features]
 
-        # Predict rainfall amount (mm) from model — no user input for rainfall
-        predicted_mm = float(rf_reg.predict(input_data)[0])
-        predicted_mm = max(0.0, predicted_mm)  # ensure non-negative
-
-        # Derive class from predicted amount (same thresholds as training)
-        if predicted_mm < 60:
-            label = "Low"
-        elif predicted_mm <= 160:
-            label = "Medium"
-        else:
-            label = "High"
-
-        # Estimate humidity from predicted rainfall for display
-        p_max    = df["monthly_rainfall_mm"].quantile(0.95)
-        humidity = float(np.clip(55 + 40 * (predicted_mm / (p_max + 1e-9)), 40, 100))
+        prediction  = rf.predict(input_data)[0]
+        probas      = rf.predict_proba(input_data)[0]
+        label       = le_label.inverse_transform([prediction])[0]
+        confidence  = probas.max() * 100
 
         class_style = {"High": "pred-high", "Medium": "pred-medium", "Low": "pred-low"}
         class_emoji = {"High": "🌊", "Medium": "🌦️", "Low": "☀️"}
@@ -366,29 +349,31 @@ with tab1:
             <div class="pred-card {class_style[label]}">
                 <div style="font-size:3.5rem">{class_emoji[label]}</div>
                 <div style="font-size:2rem; font-weight:bold">{label} Rainfall</div>
-                <div style="opacity:0.9; font-size:1.1rem; margin-top:0.5rem">Predicted: <strong>{predicted_mm:.0f} mm</strong> / month</div>
                 <div style="opacity:0.85; font-size:0.95rem; margin-top:0.4rem">{district} · {selected_date.strftime('%B %Y')}</div>
                 <div style="margin-top:1rem; font-family:'DM Sans',sans-serif; font-size:0.9rem; opacity:0.9">{class_desc[label]}</div>
             </div>
             """, unsafe_allow_html=True)
 
         with r2:
-            st.metric("Predicted Rainfall", f"{predicted_mm:.0f} mm")
+            st.metric("Confidence", f"{confidence:.1f}%")
             st.metric("Month",      selected_date.strftime("%B"))
             st.metric("Est. Humidity", f"{humidity:.0f}%")
 
         with r3:
-            # Gauge: predicted mm vs class thresholds
-            bar_color = "#2196F3" if label == "High" else "#66BB6A" if label == "Medium" else "#FF7043"
-            fig, ax = plt.subplots(figsize=(3, 2))
-            ax.barh([0], [max(predicted_mm, 10)], left=[0], height=0.4, color=bar_color, alpha=0.8)
-            ax.axvline(60, color="#94a3b8", linestyle="--", linewidth=1, alpha=0.8)
-            ax.axvline(160, color="#94a3b8", linestyle="--", linewidth=1, alpha=0.8)
-            ax.set_xlim(0, max(250, predicted_mm * 1.15))
-            ax.set_ylim(-0.5, 0.5)
-            ax.set_yticks([])
-            ax.set_xlabel("Rainfall (mm/month)", fontsize=8)
-            ax.set_title(f"Predicted: {predicted_mm:.0f} mm", fontsize=9, fontweight="bold")
+            # Probability bar chart
+            fig, ax = plt.subplots(figsize=(3, 2.5))
+            bar_colors = ["#2196F3", "#FF7043", "#66BB6A"]  # High, Low, Medium
+            sorted_classes = le_label.classes_
+            sorted_proba   = probas
+            bars = ax.barh(sorted_classes, sorted_proba * 100,
+                           color=["#2196F3" if c=="High" else "#FF7043" if c=="Low" else "#66BB6A"
+                                  for c in sorted_classes])
+            ax.set_xlim(0, 100)
+            ax.set_xlabel("Probability (%)", fontsize=8)
+            ax.set_title("Class Probabilities", fontsize=9, fontweight="bold")
+            for bar, p in zip(bars, sorted_proba):
+                ax.text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2,
+                        f"{p*100:.1f}%", va="center", fontsize=8)
             ax.tick_params(labelsize=8)
             plt.tight_layout()
             st.pyplot(fig, use_container_width=True)
@@ -399,7 +384,7 @@ with tab1:
         chip_html = "".join([
             f'<span class="metric-chip">🌡️ {temperature}°C</span>',
             f'<span class="metric-chip">💨 {wind_speed} km/h</span>',
-            f'<span class="metric-chip">💧 Predicted {predicted_mm:.0f} mm</span>',
+            f'<span class="metric-chip">💧 {monthly_rainfall_mm} mm</span>',
             f'<span class="metric-chip">☁️ {humidity:.0f}% humidity</span>',
             f'<span class="metric-chip">☀️ {radiation} MJ/m²</span>',
             f'<span class="metric-chip">📅 Month {month}</span>',
@@ -430,9 +415,10 @@ with tab2:
     feat_labels_map = {
         "district_enc":"District","month":"Month","temperature":"Temp (mean)",
         "temp_max":"Temp (max)","temp_min":"Temp (min)","wind_speed":"Wind Speed",
-        "wind_direction":"Wind Dir","rain_days":"Rain Hours","radiation":"Radiation",
+        "wind_direction":"Wind Dir","monthly_rainfall_mm":"Monthly Rainfall",
+        "rain_days":"Rain Hours","radiation":"Radiation",
         "evapotranspiration":"Evapotranspiration","latitude":"Latitude",
-        "longitude":"Longitude","elevation":"Elevation"
+        "longitude":"Longitude","elevation":"Elevation","humidity":"Humidity"
     }
     fi_df.index = [feat_labels_map.get(i, i) for i in fi_df.index]
     colors_fi   = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(fi_df)))
