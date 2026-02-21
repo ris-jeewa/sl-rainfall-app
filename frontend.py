@@ -6,6 +6,7 @@ All UI, styles, and integration with the model. Run via: streamlit run app.py
 
 import os
 import warnings
+import shap
 
 import streamlit as st
 import pandas as pd
@@ -126,7 +127,7 @@ def run_app() -> None:
         st.markdown("🟢 **Medium** — 60–160 mm/month")
         st.markdown("🔴 **Low** — < 60 mm/month")
 
-    tab1, tab2, tab3 = st.tabs(["🎯 Predict", "📊 Model Performance", "📈 Data Explorer"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🎯 Predict", "📊 Model Performance", "📈 Data Explorer", "🔍 Explainability"])
 
     # Tab 1 — Predict
     with tab1:
@@ -139,6 +140,10 @@ def run_app() -> None:
     # Tab 3 — Data Explorer
     with tab3:
         _render_tab_explorer(df, districts)
+
+    # Tab 4 — SHAP Explainability
+    with tab4:
+        _render_tab_shap(df, features, rf, le_label)
 
     st.markdown("""
     <div class="footer">
@@ -340,3 +345,116 @@ def _render_tab_explorer(df, districts) -> None:
         use_container_width=True,
         height=300
     )
+
+def _render_tab_shap(df, features, rf, le_label) -> None:
+    st.markdown("### 🔍 SHAP Explainability")
+    st.caption("SHAP explains **why** the model made each prediction — which features pushed the result up or down.")
+
+    feat_labels_map = {
+        "district_enc": "District", "month": "Month",
+        "temperature": "Temp (mean)", "temp_max": "Temp (max)",
+        "temp_min": "Temp (min)", "wind_speed": "Wind Speed",
+        "wind_direction": "Wind Dir", "monthly_rainfall_mm": "Monthly Rainfall",
+        "rain_days": "Rain Hours", "radiation": "Radiation",
+        "evapotranspiration": "Evapotranspiration", "latitude": "Latitude",
+        "longitude": "Longitude", "elevation": "Elevation", "humidity": "Humidity"
+    }
+    readable_features = [feat_labels_map.get(f, f) for f in features]
+
+    from model import get_clean_data
+    df_clean = get_clean_data(df, features)
+    if len(df_clean) == 0:
+        st.warning("No data available for SHAP (all rows dropped as null).")
+        return
+
+    # Use explicit feature order and numpy so SHAP shape matches data matrix
+    sample_df = df_clean[features].sample(n=min(300, len(df_clean)), random_state=42).reset_index(drop=True)
+    X_sample = sample_df[features].to_numpy()
+
+    with st.spinner("Calculating SHAP values — takes ~20 seconds…"):
+        explainer   = shap.TreeExplainer(rf)
+        shap_values = explainer.shap_values(X_sample)
+
+    # Multi-class: SHAP can return list of (n_samples, n_features) per class
+    # or single array (n_samples, n_features, n_classes)
+    class_idx = list(le_label.classes_).index("High") if "High" in le_label.classes_ else 0
+    sv = np.asarray(shap_values)
+    if sv.ndim == 3:
+        # (n_samples, n_features, n_classes) -> take one class
+        shap_for_plot = sv[:, :, class_idx]
+    elif isinstance(shap_values, list):
+        shap_for_plot = np.asarray(shap_values[class_idx])
+    else:
+        shap_for_plot = sv
+
+    if shap_for_plot.shape != X_sample.shape:
+        st.error(f"SHAP shape mismatch: values {shap_for_plot.shape} vs data {X_sample.shape}. Skipping SHAP plots.")
+        return
+
+    fig_s, _ = plt.subplots(figsize=(8, 5))
+    shap.summary_plot(shap_for_plot, X_sample,
+                      feature_names=readable_features,
+                      plot_type="bar", show=False, color="#2196F3")
+    plt.gca().set_title("Mean |SHAP Value| — High Rainfall Class", fontweight="bold")
+    plt.tight_layout()
+    st.pyplot(fig_s, use_container_width=True)
+    plt.close()
+
+    st.info("📌 **How to read:** Longer bar = more important feature.")
+
+    st.markdown("---")
+
+    # ── Beeswarm Plot ────────────────────────────────────
+    st.markdown("#### 🐝 Feature Impact Detail (Beeswarm)")
+    st.caption("Each dot is one prediction. **Red** = high feature value, **Blue** = low.")
+
+    fig_b, _ = plt.subplots(figsize=(8, 5))
+    shap.summary_plot(shap_for_plot, X_sample,
+                      feature_names=readable_features, show=False)
+    plt.title("SHAP Beeswarm — High Rainfall Class", fontweight="bold")
+    plt.tight_layout()
+    st.pyplot(fig_b, use_container_width=True)
+    plt.close()
+
+    st.markdown("---")
+
+    # ── Single Prediction Explainer ──────────────────────
+    st.markdown("#### 🎯 Explain a Single Prediction")
+    st.caption("Pick a record and see exactly why the model predicted what it did.")
+
+    sample_idx  = st.slider("Select record index", 0, len(sample_df) - 1, 0)
+    single_row  = sample_df.iloc[[sample_idx]]
+    single_shap = shap_for_plot[sample_idx]
+    pred_class  = le_label.inverse_transform(rf.predict(single_row))[0]
+    pred_proba  = rf.predict_proba(single_row)[0].max() * 100
+
+    c1, c2 = st.columns([1, 2])
+    class_style = {"High": "pred-high", "Medium": "pred-medium", "Low": "pred-low"}
+    class_emoji = {"High": "🌊", "Medium": "🌦️", "Low": "☀️"}
+
+    with c1:
+        st.markdown(f"""
+        <div class="pred-card {class_style[pred_class]}" style="padding:1.2rem">
+            <div style="font-size:2.5rem">{class_emoji[pred_class]}</div>
+            <div style="font-size:1.4rem; font-weight:bold">{pred_class} Rainfall</div>
+            <div style="opacity:0.85">Confidence: {pred_proba:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        fig_w, ax_w = plt.subplots(figsize=(6, 4))
+        top_idx   = np.argsort(np.abs(single_shap))[-8:]
+        top_vals  = single_shap[top_idx]
+        top_names = [readable_features[i] for i in top_idx]
+        ax_w.barh(top_names, top_vals,
+                  color=["#2196F3" if v > 0 else "#FF7043" for v in top_vals],
+                  edgecolor="white")
+        ax_w.axvline(0, color="black", linewidth=0.8)
+        ax_w.set_title(f"SHAP — Record #{sample_idx}", fontweight="bold", fontsize=10)
+        ax_w.set_xlabel("SHAP Value  (+ pushes toward High, − pushes away)")
+        ax_w.tick_params(labelsize=8)
+        plt.tight_layout()
+        st.pyplot(fig_w, use_container_width=True)
+        plt.close()
+
+    st.info("📌 **Blue bars** pushed toward High rainfall. **Red bars** pushed away.")
