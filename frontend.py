@@ -16,9 +16,6 @@ warnings.filterwarnings("ignore")
 DATA_PATH = "data/sri-lanka-weather-dataset.csv"
 
 
-# ─────────────────────────────────────────────────────────────
-# STYLES
-# ─────────────────────────────────────────────────────────────
 def _get_css() -> str:
     return """
 <style>
