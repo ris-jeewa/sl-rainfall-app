@@ -179,10 +179,10 @@ def train_model(path):
     df["rainfall_class_enc"] = le_label.fit_transform(df["rainfall_class"].astype(str))
 
     features = [
-        "district_enc", "month", "temperature", "temp_max", "temp_min",
-        "wind_speed", "wind_direction", "monthly_rainfall_mm",
-        "rain_days", "radiation", "evapotranspiration",
-        "latitude", "longitude", "elevation", "humidity"
+    "district_enc", "month", "temperature", "temp_max", "temp_min",
+    "wind_speed", "wind_direction",
+    "rain_days", "radiation", "evapotranspiration",
+    "latitude", "longitude", "elevation"
     ]
 
     df_clean = df[features + ["rainfall_class_enc"]].dropna()
