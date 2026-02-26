@@ -2,6 +2,8 @@
 
 A Streamlit web app that predicts monthly rainfall class (Low / Medium / High) for districts in Sri Lanka using a **Random Forest** classifier trained on historical weather data.
 
+**Live demo:** [https://ris-jeewa-sl-rainfall-app-app-vx0zao.streamlit.app/](https://ris-jeewa-sl-rainfall-app-app-vx0zao.streamlit.app/)
+
 ![Sri Lanka Rainfall Predictor](home.png)
 ![predicted result](image.png)
 
